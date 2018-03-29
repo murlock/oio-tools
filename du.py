@@ -69,6 +69,7 @@ def main():
     ACCOUNT = args.account
     PROXY = ObjectStorageApi("OPENIO")
 
+    args.path = args.path.rstrip('/')
     if '/' in args.path:
         bucket, path = args.path.split('/', 1)
     else:
