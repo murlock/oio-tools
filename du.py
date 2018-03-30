@@ -4,7 +4,9 @@
 
 from __future__ import print_function
 import argparse
+import math
 import os
+
 from oio.api.object_storage import ObjectStorageApi
 
 
@@ -38,16 +40,30 @@ def options():
     parser = argparse.ArgumentParser()
     parser.add_argument("--account", default=os.getenv("OIO_ACCOUNT", "demo"))
     parser.add_argument("--namespace", default=os.getenv("OIO_NS", "OPENIO"))
+    parser.add_argument("--human", "-H", action="store_true", default=False)
     parser.add_argument("path", help="bucket/path1/path2")
 
     return parser.parse_args()
+
+
+def show(size, human=False):
+    if not human:
+        return "%10d" % size
+
+    if size == 0:
+        return "%10s" % "0B"
+
+    size_name = ("iB", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB")
+    i = int(math.floor(math.log(size, 1024)))
+    p = math.pow(1024, i)
+    s = round(size / p, 2)
+    return "%7s%s" % (s, size_name[i])
 
 
 def full_list(**kwargs):
         listing = PROXY.container_list(
             ACCOUNT, **kwargs)
         for element in listing:
-            # print(element)
             yield element
 
         while listing:
@@ -56,10 +72,7 @@ def full_list(**kwargs):
                 ACCOUNT, **kwargs)
             if listing:
                 for element in listing:
-                    # print(element)
                     yield element
-
-    # listing = full_list()
 
 
 def main():
@@ -97,7 +110,6 @@ def main():
     files = 0
     size = 0
     _bucket = container_hierarchy(bucket, path)
-    # containers = PROXY.container_list(ACCOUNT, prefix=container_hierarchy(bucket, path), limit=9999)
     for entry in full_list(prefix=container_hierarchy(bucket, path)):
         name, _files, _size, _ = entry
         if name != _bucket and not name.startswith(_bucket + '%2F'):
@@ -116,10 +128,10 @@ def main():
                 SUM[_name] = _size
             items.pop()
 
-    view = [ (v, k) for k, v in SUM.items() ]
+    view = [(v, k) for k, v in SUM.items()]
     view.sort()
     for v, k in view:
-        print("%8d  %s" % (v, k))
+        print("%s  %s" % (show(v, args.human), k))
 
     print("found %d files, %s bytes" % (files, size))
 
