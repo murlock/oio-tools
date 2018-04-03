@@ -6,8 +6,11 @@ from __future__ import print_function
 import argparse
 import os
 # from Queue import Queue
-from eventlet import Queue
 import eventlet
+eventlet.monkey_patch()
+
+from eventlet import Queue
+import time
 from oio.api.object_storage import ObjectStorageApi
 
 
@@ -23,14 +26,21 @@ def worker_objects():
     while True:
         name = QUEUE.get(timeout=TIMEOUT)
 
-        try:
-            items = proxy.object_list(ACCOUNT, name)
-            objs = [_item['name'] for _item in items['objects']]
-            if VERBOSE:
-                print("Deleting", len(objs), "objects")
-            proxy.object_delete_many(ACCOUNT, name, objs=objs)
-        except Exception as ex:
-            print("Objs %s: %s" % (name, str(ex)))
+        items = proxy.object_list(ACCOUNT, name)
+        objs = [_item['name'] for _item in items['objects']]
+        if VERBOSE:
+            print("Deleting", len(objs), "objects")
+        while True:
+            try:
+                proxy.object_delete_many(ACCOUNT, name, objs=objs)
+                break
+            except Exception as ex:
+                print("Objs %s: %s" % (name, str(ex)))
+                if "Election failed" in str(ex):
+                    # wait default Election wait delay
+                    time.sleep(20)
+                    continue
+                break
 
         QUEUE.task_done()
 
