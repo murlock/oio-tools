@@ -20,7 +20,10 @@ VERBOSE = False
 def worker_objects():
     proxy = ObjectStorageApi(NS)
     while True:
-        name = QUEUE.get(timeout=5)
+        try:
+            name = QUEUE.get(timeout=5)
+        except Queue.empty:
+            break
 
         try:
             items = proxy.object_list(ACCOUNT, name)
@@ -37,7 +40,10 @@ def worker_objects():
 def worker_container():
     proxy = ObjectStorageApi(NS)
     while True:
-        name = QUEUE.get()
+        try:
+            name = QUEUE.get(timeout=5)
+        except Queue.empty:
+            break
 
         if VERBOSE:
             print("Deleting", name)
@@ -62,7 +68,7 @@ def options():
     parser.add_argument("--namespace", default=os.getenv("OIO_NS", "OPENIO"))
     parser.add_argument("--max-worker", default=1, type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
-    parser.add_argument("path", help="bucket/path1/path2")
+    parser.add_argument("path", nargs='+', help="bucket/path1/path2")
 
     return parser.parse_args()
 
@@ -94,47 +100,48 @@ def main():
     num_worker_threads = int(args.max_worker)
     print("Using %d workers" % num_worker_threads)
 
-    args.path = args.path.rstrip('/')
-    if '/' in args.path:
-        bucket, path = args.path.split('/', 1)
-    else:
-        bucket = args.path
-        path = ""
+    for path in args.path:
+        path = path.rstrip('/')
+        if '/' in path:
+            bucket, path = path.split('/', 1)
+        else:
+            bucket = path
+            path = ""
 
-    containers = []
+        containers = []
 
-    QUEUE = Queue()
-    pool = eventlet.GreenPool(num_worker_threads)
+        QUEUE = Queue()
+        pool = eventlet.GreenPool(num_worker_threads)
 
-    for i in range(num_worker_threads):
-        pool.spawn(worker_objects)
+        for i in range(num_worker_threads):
+            pool.spawn(worker_objects)
 
-    _bucket = container_hierarchy(bucket, path)
-    # we don't use placeholders, we use prefix path as prefix
-    for entry in full_list(prefix=container_hierarchy(bucket, path)):
-        name, _files, _size, _ = entry
-        if name != _bucket and not name.startswith(_bucket + '%2F'):
-            continue
+        _bucket = container_hierarchy(bucket, path)
+        # we don't use placeholders, we use prefix path as prefix
+        for entry in full_list(prefix=container_hierarchy(bucket, path)):
+            name, _files, _size, _ = entry
+            if name != _bucket and not name.startswith(_bucket + '%2F'):
+                continue
 
-        if _files:
-            QUEUE.put(name)
+            if _files:
+                QUEUE.put(name)
 
-        containers.append(name)
+            containers.append(name)
 
-    # we have to wait all objects
-    print("Waiting flush of objects")
-    QUEUE.join()
+        # we have to wait all objects
+        print("Waiting flush of objects")
+        QUEUE.join()
 
-    QUEUE = Queue()
-    for i in range(num_worker_threads):
-        pool.spawn(worker_container)
+        QUEUE = Queue()
+        for i in range(num_worker_threads):
+            pool.spawn(worker_container)
 
-    print("We have to delete", len(containers), "containers")
+        print("We have to delete", len(containers), "containers")
 
-    for container in containers:
-        QUEUE.put(container)
+        for container in containers:
+            QUEUE.put(container)
 
-    QUEUE.join()
+        QUEUE.join()
 
 
 if __name__ == "__main__":
