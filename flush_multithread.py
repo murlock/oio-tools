@@ -14,6 +14,7 @@ from oio.api.object_storage import ObjectStorageApi
 NS = None
 ACCOUNT = None
 PROXY = None
+VERBOSE = False
 
 
 def worker_objects():
@@ -24,7 +25,8 @@ def worker_objects():
         try:
             items = proxy.object_list(ACCOUNT, name)
             objs = [_item['name'] for _item in items['objects']]
-            print("Deleting", len(objs), "objects")
+            if VERBOSE:
+                print("Deleting", len(objs), "objects")
             proxy.object_delete_many(ACCOUNT, name, objs=objs)
         except Exception as ex:
             print("Objs %s: %s" % (name, str(ex)))
@@ -37,7 +39,8 @@ def worker_container():
     while True:
         name = QUEUE.get()
 
-        print("Deleting", name)
+        if VERBOSE:
+            print("Deleting", name)
         try:
             proxy.container_delete(ACCOUNT, name)
         except Exception as ex:
@@ -58,6 +61,7 @@ def options():
     parser.add_argument("--account", default=os.getenv("OIO_ACCOUNT", "demo"))
     parser.add_argument("--namespace", default=os.getenv("OIO_NS", "OPENIO"))
     parser.add_argument("--max-worker", default=1, type=int)
+    parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("path", help="bucket/path1/path2")
 
     return parser.parse_args()
@@ -81,9 +85,10 @@ def full_list(**kwargs):
 def main():
     args = options()
 
-    global ACCOUNT, PROXY, QUEUE, NS
+    global ACCOUNT, PROXY, QUEUE, NS, VERBOSE
     ACCOUNT = args.account
     NS = args.namespace
+    VERBOSE = args.verbose
     PROXY = ObjectStorageApi(NS)
 
     num_worker_threads = int(args.max_worker)
@@ -100,12 +105,7 @@ def main():
 
     QUEUE = Queue()
     pool = eventlet.GreenPool(num_worker_threads)
-    """
-    for i in range(num_worker_threads):
-        t = Thread(target=worker_objects)
-        t.daemon = True
-        t.start()
-    """
+
     for i in range(num_worker_threads):
         pool.spawn(worker_objects)
 
