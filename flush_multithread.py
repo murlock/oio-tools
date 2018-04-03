@@ -15,15 +15,13 @@ NS = None
 ACCOUNT = None
 PROXY = None
 VERBOSE = False
+TIMEOUT = 5
 
 
 def worker_objects():
     proxy = ObjectStorageApi(NS)
     while True:
-        try:
-            name = QUEUE.get(timeout=5)
-        except Queue.empty:
-            break
+        name = QUEUE.get(timeout=TIMEOUT)
 
         try:
             items = proxy.object_list(ACCOUNT, name)
@@ -40,10 +38,7 @@ def worker_objects():
 def worker_container():
     proxy = ObjectStorageApi(NS)
     while True:
-        try:
-            name = QUEUE.get(timeout=5)
-        except Queue.empty:
-            break
+        name = QUEUE.get(timeout=TIMEOUT)
 
         if VERBOSE:
             print("Deleting", name)
@@ -68,6 +63,7 @@ def options():
     parser.add_argument("--namespace", default=os.getenv("OIO_NS", "OPENIO"))
     parser.add_argument("--max-worker", default=1, type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
+    parser.add_argument("--timeout", default=5, type=int)
     parser.add_argument("path", nargs='+', help="bucket/path1/path2")
 
     return parser.parse_args()
@@ -91,10 +87,11 @@ def full_list(**kwargs):
 def main():
     args = options()
 
-    global ACCOUNT, PROXY, QUEUE, NS, VERBOSE
+    global ACCOUNT, PROXY, QUEUE, NS, VERBOSE, TIMEOUT
     ACCOUNT = args.account
     NS = args.namespace
     VERBOSE = args.verbose
+    TIMEOUT = args.timeout
     PROXY = ObjectStorageApi(NS)
 
     num_worker_threads = int(args.max_worker)
