@@ -14,12 +14,12 @@ from oio.api.object_storage import ObjectStorageApi
 
 eventlet.monkey_patch()
 
-
 NS = None
 ACCOUNT = None
 PROXY = None
 VERBOSE = False
 TIMEOUT = 5
+COUNTERS = None
 
 
 class AtomicInteger():
@@ -27,11 +27,17 @@ class AtomicInteger():
         self._files = 0
         self._size = 0
         self._lock = threading.Lock()
+        self._total_files = 0
+        self._total_size = 0
+        self._start = time.time()
 
     def add(self, files, size):
         with self._lock:
             self._files += files
             self._size += size
+
+            self._total_files += files
+            self._total_size += size
 
     def reset(self):
         with self._lock:
@@ -40,8 +46,12 @@ class AtomicInteger():
             self._size = 0
             return val
 
+    def total(self):
+        with self._lock:
+            return (self._total_files, self._total_size)
 
-COUNTERS = AtomicInteger()
+    def time(self):
+        return time.time() - self._start
 
 
 def worker_objects():
@@ -143,6 +153,7 @@ def main():
     args = options()
 
     global ACCOUNT, PROXY, QUEUE, NS, VERBOSE, TIMEOUT
+    global COUNTERS
     ACCOUNT = args.account
     NS = args.namespace
     VERBOSE = args.verbose
@@ -151,6 +162,13 @@ def main():
 
     num_worker_threads = int(args.max_worker)
     print("Using %d workers" % num_worker_threads)
+
+    total_objects = {'size': 0,
+                     'files': 0,
+                     'elapsed': 0}
+    total_containers = {'size': 0,
+                        'files': 0,
+                        'elapsed': 0}
 
     for path in args.path:
         path = path.rstrip('/')
@@ -168,6 +186,7 @@ def main():
         for i in range(num_worker_threads):
             pool.spawn(worker_objects)
 
+        COUNTERS = AtomicInteger()
         _bucket = container_hierarchy(bucket, path)
         # we don't use placeholders, we use prefix path as prefix
         for entry in full_list(prefix=container_hierarchy(bucket, path)):
@@ -198,6 +217,13 @@ def main():
         print("Waiting end of workers")
         QUEUE.join()
 
+        val = COUNTERS.total()
+        total_objects['files'] += val[0]
+        total_objects['size'] += val[1]
+        total_objects['elapsed'] += COUNTERS.time()
+
+        COUNTERS = AtomicInteger()
+
         QUEUE = Queue()
         for i in range(num_worker_threads):
             pool.spawn(worker_container)
@@ -217,6 +243,27 @@ def main():
             sys.stdout.flush()
 
         QUEUE.join()
+        val = COUNTERS.total()
+        total_containers['files'] += val[0]
+        total_containers['size'] += val[1]
+        total_containers['elapsed'] += COUNTERS.time()
+
+    print("""
+Objects:
+    - ran during {o[elapsed]:5.2f}
+    - {o[files]} objects removed (size {o[size]})
+    - {o_file_avg:5.2f} objects/s ({o_size_avg:5.2f} avg. size/s)
+""".format(o=total_objects,
+           o_file_avg=total_objects['files']/total_objects['elapsed'],
+           o_size_avg=total_objects['size']/total_objects['elapsed']))
+
+    print("""
+Containers:
+    - ran during {o[elapsed]:5.2f}
+    - {o[files]} containers
+    - {o_file_avg:5.2f} objects/s
+""".format(o=total_containers,
+           o_file_avg=total_containers['files']/total_containers['elapsed']))
 
 
 if __name__ == "__main__":
