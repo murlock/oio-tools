@@ -50,6 +50,8 @@ def worker_objects():
         try:
             name = QUEUE.get(timeout=TIMEOUT)
         except eventlet.queue.Empty:
+            if VERBOSE:
+                print("Leaving worker")
             break
 
         while True:
@@ -65,11 +67,11 @@ def worker_objects():
                 COUNTERS.add(len(objs), size)
                 break
             except Exception as ex:
-                print("Objs %s: %s" % (name, str(ex)))
                 if "Election failed" in str(ex):
                     # wait default Election wait delay
                     time.sleep(20)
                     continue
+                print("Objs %s: %s" % (name, str(ex)), file=sys.stderr)
                 break
 
         QUEUE.task_done()
@@ -83,14 +85,21 @@ def worker_container():
         except eventlet.queue.Empty:
             break
 
-        if VERBOSE:
-            print("Deleting", name)
-        try:
-            proxy.container_delete(ACCOUNT, name)
-        except Exception as ex:
-            print("Container %s: %s" % (name, str(ex)))
+        while True:
+            if VERBOSE:
+                print("Deleting", name)
+            try:
+                proxy.container_delete(ACCOUNT, name)
+                COUNTERS.add(1, 0)
+                break
+            except Exception as ex:
+                if "Election failed" in str(ex):
+                    # wait default Election wait delay
+                    time.sleep(20)
+                    continue
+                print("Container %s: %s" % (name, str(ex)), file=sys.stderr)
+                break
 
-        COUNTERS.add(1, 0)
         QUEUE.task_done()
 
 
@@ -105,7 +114,7 @@ def options():
     parser = argparse.ArgumentParser()
     parser.add_argument("--account", default=os.getenv("OIO_ACCOUNT", "demo"))
     parser.add_argument("--namespace", default=os.getenv("OIO_NS", "OPENIO"))
-    parser.add_argument("--max-worker", default=1, type=int)
+    parser.add_argument("--max-worker", default=20, type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--timeout", default=5, type=int)
     parser.add_argument("--report", default=60, type=int,
