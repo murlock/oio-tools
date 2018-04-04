@@ -20,6 +20,7 @@ PROXY = None
 VERBOSE = False
 TIMEOUT = 5
 COUNTERS = None
+ELECTIONS = None
 
 
 class AtomicInteger():
@@ -79,6 +80,7 @@ def worker_objects():
             except Exception as ex:
                 if "Election failed" in str(ex):
                     # wait default Election wait delay
+                    ELECTIONS.add(1, 0)
                     time.sleep(20)
                     continue
                 print("Objs %s: %s" % (name, str(ex)), file=sys.stderr)
@@ -105,6 +107,7 @@ def worker_container():
             except Exception as ex:
                 if "Election failed" in str(ex):
                     # wait default Election wait delay
+                    ELECTIONS.add(1, 0)
                     time.sleep(20)
                     continue
                 print("Container %s: %s" % (name, str(ex)), file=sys.stderr)
@@ -153,12 +156,13 @@ def main():
     args = options()
 
     global ACCOUNT, PROXY, QUEUE, NS, VERBOSE, TIMEOUT
-    global COUNTERS
+    global COUNTERS, ELECTIONS
     ACCOUNT = args.account
     NS = args.namespace
     VERBOSE = args.verbose
     TIMEOUT = args.timeout
     PROXY = ObjectStorageApi(NS)
+    ELECTIONS = AtomicInteger()
 
     num_worker_threads = int(args.max_worker)
     print("Using %d workers" % num_worker_threads)
@@ -210,8 +214,13 @@ def main():
                 time.sleep(1)
             diff = time.time() - ts
             val = COUNTERS.reset()
+            elections = ELECTIONS.reset()
             print("Objects: %5.2f / Size: %5.2f" % (
-                    val[0] / diff, val[1] / diff), end='\r')
+                  val[0] / diff, val[1] / diff),
+                  "Elections failed: %5.2f/s total: %d" % (
+                  elections[0] / diff, ELECTIONS.total()[0]
+                  ), " " * 20,
+                  end='\r')
             sys.stdout.flush()
 
         print("Waiting end of workers")
@@ -239,7 +248,12 @@ def main():
                 time.sleep(1)
             diff = time.time() - ts
             val = COUNTERS.reset()
-            print("Containers: %5.2f" % (val[0] / diff), end='\r')
+            elections = ELECTIONS.reset()
+            print("Containers: %5.2f" % (val[0] / diff),
+                  "Elections failed: %5.2f/s total: %d" % (
+                  elections[0] / diff, ELECTIONS.total()[0]
+                  ), " " * 20,
+            end='\r')
             sys.stdout.flush()
 
         QUEUE.join()
@@ -261,10 +275,11 @@ Objects:
 Containers:
     - ran during {o[elapsed]:5.2f}
     - {o[files]} containers
-    - {o_file_avg:5.2f} objects/s
+    - {o_file_avg:5.2f} containers/s
 """.format(o=total_containers,
            o_file_avg=total_containers['files']/total_containers['elapsed']))
 
+    print("Elections failed: %d" % ELECTIONS.total()[0])
 
 if __name__ == "__main__":
     main()
