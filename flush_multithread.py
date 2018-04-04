@@ -5,13 +5,14 @@
 from __future__ import print_function
 import argparse
 import os
-# from Queue import Queue
+import threading
 import eventlet
-eventlet.monkey_patch()
-
 from eventlet import Queue
+import sys
 import time
 from oio.api.object_storage import ObjectStorageApi
+
+eventlet.monkey_patch()
 
 
 NS = None
@@ -21,18 +22,47 @@ VERBOSE = False
 TIMEOUT = 5
 
 
+class AtomicInteger():
+    def __init__(self):
+        self._files = 0
+        self._size = 0
+        self._lock = threading.Lock()
+
+    def add(self, files, size):
+        with self._lock:
+            self._files += files
+            self._size += size
+
+    def reset(self):
+        with self._lock:
+            val = (self._files, self._size)
+            self._files = 0
+            self._size = 0
+            return val
+
+
+COUNTERS = AtomicInteger()
+
+
 def worker_objects():
     proxy = ObjectStorageApi(NS)
     while True:
-        name = QUEUE.get(timeout=TIMEOUT)
+        try:
+            name = QUEUE.get(timeout=TIMEOUT)
+        except eventlet.queue.Empty:
+            break
 
-        items = proxy.object_list(ACCOUNT, name)
-        objs = [_item['name'] for _item in items['objects']]
-        if VERBOSE:
-            print("Deleting", len(objs), "objects")
         while True:
             try:
+                items = proxy.object_list(ACCOUNT, name)
+                objs = [_item['name'] for _item in items['objects']]
+                size = sum([_item['size'] for _item in items['objects']])
+                if len(objs) == 0:
+                    break
+                if VERBOSE:
+                    print("Deleting", len(objs), "objects")
                 proxy.object_delete_many(ACCOUNT, name, objs=objs)
+                COUNTERS.add(len(objs), size)
                 break
             except Exception as ex:
                 print("Objs %s: %s" % (name, str(ex)))
@@ -48,7 +78,10 @@ def worker_objects():
 def worker_container():
     proxy = ObjectStorageApi(NS)
     while True:
-        name = QUEUE.get(timeout=TIMEOUT)
+        try:
+            name = QUEUE.get(timeout=TIMEOUT)
+        except eventlet.queue.Empty:
+            break
 
         if VERBOSE:
             print("Deleting", name)
@@ -57,6 +90,7 @@ def worker_container():
         except Exception as ex:
             print("Container %s: %s" % (name, str(ex)))
 
+        COUNTERS.add(1, 0)
         QUEUE.task_done()
 
 
@@ -74,6 +108,8 @@ def options():
     parser.add_argument("--max-worker", default=1, type=int)
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--timeout", default=5, type=int)
+    parser.add_argument("--report", default=60, type=int,
+                        help="Report progress every X seconds")
     parser.add_argument("path", nargs='+', help="bucket/path1/path2")
 
     return parser.parse_args()
@@ -137,6 +173,20 @@ def main():
 
         # we have to wait all objects
         print("Waiting flush of objects")
+
+        report = args.report
+
+        while not QUEUE.empty():
+            ts = time.time()
+            while time.time() - ts < report and not QUEUE.empty():
+                time.sleep(1)
+            diff = time.time() - ts
+            val = COUNTERS.reset()
+            print("Objects: %5.2f / Size: %5.2f" % (
+                    val[0] / diff, val[1] / diff), end='\r')
+            sys.stdout.flush()
+
+        print("Waiting end of workers")
         QUEUE.join()
 
         QUEUE = Queue()
@@ -147,6 +197,15 @@ def main():
 
         for container in containers:
             QUEUE.put(container)
+
+        while not QUEUE.empty():
+            ts = time.time()
+            while time.time() - ts < report and not QUEUE.empty():
+                time.sleep(1)
+            diff = time.time() - ts
+            val = COUNTERS.reset()
+            print("Containers: %5.2f" % (val[0] / diff), end='\r')
+            sys.stdout.flush()
 
         QUEUE.join()
 
