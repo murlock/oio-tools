@@ -4,6 +4,7 @@
 
 from __future__ import print_function
 import argparse
+import math
 import os
 import threading
 import eventlet
@@ -53,6 +54,20 @@ class AtomicInteger():
 
     def time(self):
         return time.time() - self._start
+
+
+def show(size, human=False):
+    if not human:
+        return "%10d" % size
+
+    if size == 0:
+        return "%10s" % "0B"
+
+    size_name = ("iB", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB")
+    i = int(math.floor(math.log(size, 1024)))
+    p = math.pow(1024, i)
+    s = round(size / p, 2)
+    return "%7s%s" % (s, size_name[i])
 
 
 def worker_objects():
@@ -265,11 +280,12 @@ def main():
     print("""
 Objects:
     - ran during {o[elapsed]:5.2f}
-    - {o[files]} objects removed (size {o[size]})
-    - {o_file_avg:5.2f} objects/s ({o_size_avg:5.2f} avg. size/s)
+    - {o[files]} objects removed (size {size})
+    - {o_file_avg:5.2f} objects/s ({o_size_avg} avg. size/s)
 """.format(o=total_objects,
+           size=show(total_objects['size'], True),
            o_file_avg=total_objects['files']/total_objects['elapsed'],
-           o_size_avg=total_objects['size']/total_objects['elapsed']))
+           o_size_avg=show(total_objects['size']/total_objects['elapsed'], True)))
 
     print("""
 Containers:
