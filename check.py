@@ -38,7 +38,7 @@ def options(args):
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--dry-run", default=False, action="store_true")
     parser.add_argument("--prefix", help="prefix of containers of check")
-    parser.add_argument("account", help="IP:PORT of Account service")
+    parser.add_argument("host", help="IP:PORT of Account service")
 
     return parser.parse_args()
 
@@ -80,5 +80,5 @@ if __name__ == "__main__":
     args = options(sys.argv)
     ACCOUNT = args.account
     NAMESPACE =  args.namespace
-    HOST = args.account
+    HOST = args.host
     run(args)
