@@ -11,7 +11,6 @@ from oio.directory.client import DirectoryClient
 from oio.common.http import get_pool_manager
 from oio.account.backend import AccountBackend
 from oio.common.exceptions import NotFound
-from oio.conscience.client import LbClient
 
 ACCOUNT = "murlock"
 NAMESPACE = "OPENIO"
@@ -38,15 +37,26 @@ def options(args):
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--dry-run", default=False, action="store_true")
     parser.add_argument("--prefix", help="prefix of containers of check")
+    parser.add_argument("--redis-sentinel-hosts", dest="sentinel_hosts",
+                        default=None, help="sentinel hosts")
+    parser.add_argument("--redis-sentinel-master-name",
+                        dest="sentinel_master_name", default='oio',
+                        help="sentinel name")
+    parser.add_argument("--redis-host", dest="sentinel_master_name",
+                        default='127.0.0.1', help="redis single host")
+    parser.add_argument("--redis-port", default=6379, help="redis single host")
     parser.add_argument("host", help="IP:PORT of Account service")
 
     return parser.parse_args()
 
+
 def run(args):
     pool = get_pool_manager()
 
-    dirclient = DirectoryClient({"namespace": NAMESPACE})
-    backend = AccountBackend(dirclient.conf)
+    v = vars(args)
+
+    dirclient = DirectoryClient(v)
+    backend = AccountBackend(v)
 
     for entry, _, _, partial in full_list(backend, prefix=args.prefix):
         if partial:
@@ -63,13 +73,15 @@ def run(args):
         except Exception as exc:
             print("Exception not managed for %s: %s" % (entry, str(exc)))
             continue
-        print("%s: meta2 not found", entry)
+        print("%s: meta2 not found" % entry)
         if args.dry_run:
             continue
 
         data = {"dtime": time(), "name": entry}
         # post event to Account service
-        res = pool.request('POST', HOST + '/v1.0/account/container/update?id=%s' % ACCOUNT,
+        res = pool.request(
+            'POST',
+            HOST + '/v1.0/account/container/update?id=%s' % ACCOUNT,
             headers={'Content-Type': 'application/json'},
             body=json.dumps(data))
         if res.status_int / 100 != 2:
@@ -79,6 +91,6 @@ def run(args):
 if __name__ == "__main__":
     args = options(sys.argv)
     ACCOUNT = args.account
-    NAMESPACE =  args.namespace
+    NAMESPACE = args.namespace
     HOST = args.host
     run(args)
